@@ -1,0 +1,7 @@
+{
+  "name": "ScanToReturn",
+  "description": "A serverless Lost & Found system using QR codes, Google Sheets, and Gemini AI to reunite owners with their items.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
