@@ -1,6 +1,7 @@
 import { TagData, TagStatus, ActivationPayload } from '../types';
 
 const STORAGE_KEY = 'scan_to_return_db';
+const DEFAULT_URL = 'https://script.google.com/macros/s/AKfycbwDvbsM6B3GoqqAsGCXR-vkhBhve5dT3ExSF0ukrWqQcZP0LKQRf_tguIcRkXZ5mLq5/exec';
 
 // Initialize mock DB if empty
 const initDB = () => {
@@ -24,11 +25,13 @@ const initDB = () => {
 };
 
 export const getTagStatus = async (tagId: string, gasUrl?: string): Promise<TagData> => {
+  const urlToUse = gasUrl || DEFAULT_URL;
+
   // If a real Google Apps Script URL is provided
-  if (gasUrl && gasUrl.startsWith('http')) {
+  if (urlToUse && urlToUse.startsWith('http')) {
     try {
       // GAS requires redirect following.
-      const response = await fetch(`${gasUrl}?tag=${tagId}`, {
+      const response = await fetch(`${urlToUse}?tag=${tagId}`, {
         method: 'GET',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }
       });
@@ -68,8 +71,10 @@ export const getTagStatus = async (tagId: string, gasUrl?: string): Promise<TagD
 };
 
 export const activateTag = async (payload: ActivationPayload, gasUrl?: string): Promise<boolean> => {
+  const urlToUse = gasUrl || DEFAULT_URL;
+
   // Real API Call
-  if (gasUrl && gasUrl.startsWith('http')) {
+  if (urlToUse && urlToUse.startsWith('http')) {
     try {
       // Google Apps Script Web App POST requests usually have CORS issues in browser
       // because of the 302 redirect. 
@@ -81,7 +86,7 @@ export const activateTag = async (payload: ActivationPayload, gasUrl?: string): 
       formData.append('item_name', payload.itemName);
       formData.append('phone', payload.ownerPhone);
       
-      await fetch(gasUrl, {
+      await fetch(urlToUse, {
         method: 'POST',
         body: formData,
         mode: 'no-cors' 

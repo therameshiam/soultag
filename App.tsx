@@ -7,16 +7,24 @@ import { getTagStatus, getAllTags } from './services/mockBackend';
 import { TagData, TagStatus } from './types';
 import { QrCode, Shield } from 'lucide-react';
 
+// Your Google Apps Script Web App URL
+const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwDvbsM6B3GoqqAsGCXR-vkhBhve5dT3ExSF0ukrWqQcZP0LKQRf_tguIcRkXZ5mLq5/exec';
+
 const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [currentTag, setCurrentTag] = useState<TagData | null>(null);
-  const [gasUrl, setGasUrl] = useState<string>('');
+  const [gasUrl, setGasUrl] = useState<string>(DEFAULT_GAS_URL);
   const [view, setView] = useState<'landing' | 'activating' | 'found' | 'success'>('landing');
 
-  // Load backend config
+  // Load backend config from local storage, or stick with default
   useEffect(() => {
     const savedUrl = localStorage.getItem('gas_api_url');
-    if (savedUrl) setGasUrl(savedUrl);
+    if (savedUrl) {
+      setGasUrl(savedUrl);
+    } else {
+      // Ensure default is saved if nothing exists
+      localStorage.setItem('gas_api_url', DEFAULT_GAS_URL);
+    }
   }, []);
 
   // Parse URL Parameters
