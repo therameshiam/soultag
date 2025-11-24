@@ -3,9 +3,28 @@ import { TagData, TagStatus, ActivationPayload } from '../types';
 const STORAGE_KEY = 'scan_to_return_db';
 const DEFAULT_URL = 'https://script.google.com/macros/s/AKfycbwDvbsM6B3GoqqAsGCXR-vkhBhve5dT3ExSF0ukrWqQcZP0LKQRf_tguIcRkXZ5mLq5/exec';
 
+// Safe LocalStorage Helper (Prevents crashes in Incognito/Private modes)
+const safeLocalStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      console.warn('LocalStorage access denied or not available');
+      return null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.warn('LocalStorage write failed');
+    }
+  }
+};
+
 // Initialize mock DB if empty
 const initDB = () => {
-  if (!localStorage.getItem(STORAGE_KEY)) {
+  if (!safeLocalStorage.getItem(STORAGE_KEY)) {
     const initialData: Record<string, TagData> = {};
     // Create 10 mock tags
     for (let i = 1; i <= 10; i++) {
@@ -20,7 +39,7 @@ const initDB = () => {
       ownerPhone: '15551234567', // Demo phone
       redirectUrl: 'https://wa.me/15551234567'
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(initialData));
+    safeLocalStorage.setItem(STORAGE_KEY, JSON.stringify(initialData));
   }
 };
 
@@ -30,12 +49,25 @@ export const getTagStatus = async (tagId: string, gasUrl?: string): Promise<TagD
   // If a real Google Apps Script URL is provided
   if (urlToUse && urlToUse.startsWith('http')) {
     try {
-      // GAS requires redirect following.
+      // CRITICAL FIX: Do NOT send headers with GET requests to GAS Web Apps.
+      // Sending headers triggers a CORS Preflight (OPTIONS) request, which GAS rejects with 405.
       const response = await fetch(`${urlToUse}?tag=${tagId}`, {
         method: 'GET',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+        // mode: 'cors' is default and correct for GET if we want to read the body
+        // headers: {}  <-- REMOVED to allow Simple Request
       });
-      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(`HTTP Error: ${response.status}`);
+      }
+
+      const text = await response.text();
+      // GAS sometimes returns HTML error pages even with 200 OK
+      if (text.trim().startsWith('<')) { 
+          throw new Error("Received HTML instead of JSON"); 
+      }
+
+      const data = JSON.parse(text);
       
       // Map GAS response to App Types
       if (data.status === 'found') {
@@ -43,31 +75,35 @@ export const getTagStatus = async (tagId: string, gasUrl?: string): Promise<TagD
           tagId,
           status: TagStatus.ACTIVE,
           itemName: data.item,
-          ownerPhone: data.phone, // In production, this might be hidden/masked
+          ownerPhone: data.phone, 
           redirectUrl: data.phone ? `https://wa.me/${data.phone}` : undefined
         };
       }
+      // If status is 'new' or anything else
       return { tagId, status: TagStatus.NEW };
       
     } catch (e) {
-      console.warn("Failed to fetch from real API, checking network...", e);
-      // In a real app, we might throw error, but for hybrid demo, we might fallback
-      // throw new Error("Connection failed"); 
-      // Fallback allowed for demo purposes if GAS fails (e.g. CORS strictness)
+      console.warn("Failed to fetch from real API, falling back to mock...", e);
+      // We intentionally fall through to mock data so the UI doesn't break completely
     }
   }
 
   // Fallback to LocalStorage Mock
   initDB();
-  await new Promise(resolve => setTimeout(resolve, 800)); // Simulate network latency
-  const db = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-  const tag = db[tagId];
+  await new Promise(resolve => setTimeout(resolve, 500)); // Shortened latency
+  
+  try {
+    const db = JSON.parse(safeLocalStorage.getItem(STORAGE_KEY) || '{}');
+    const tag = db[tagId];
 
-  if (!tag) {
-    // If tag doesn't exist in DB, treat as new for this system
+    if (!tag) {
+      return { tagId, status: TagStatus.NEW };
+    }
+    return tag;
+  } catch (e) {
+    // Extreme fallback if localStorage fails
     return { tagId, status: TagStatus.NEW };
   }
-  return tag;
 };
 
 export const activateTag = async (payload: ActivationPayload, gasUrl?: string): Promise<boolean> => {
@@ -76,21 +112,32 @@ export const activateTag = async (payload: ActivationPayload, gasUrl?: string): 
   // Real API Call
   if (urlToUse && urlToUse.startsWith('http')) {
     try {
-      // Google Apps Script Web App POST requests usually have CORS issues in browser
-      // because of the 302 redirect. 
-      // 'no-cors' allows the request to reach Google, but we won't get a readable response.
-      // We assume success if no network error occurs.
-      
       const formData = new FormData();
       formData.append('tag_id', payload.tagId);
       formData.append('item_name', payload.itemName);
       formData.append('phone', payload.ownerPhone);
       
+      // 'no-cors' allows the request to reach Google (Fire & Forget)
       await fetch(urlToUse, {
         method: 'POST',
         body: formData,
         mode: 'no-cors' 
       });
+      
+      // We assume success if no network error occurs
+      // We also optimistically update local cache so UI feels instant
+      try {
+         const db = JSON.parse(safeLocalStorage.getItem(STORAGE_KEY) || '{}');
+         db[payload.tagId] = {
+            tagId: payload.tagId,
+            status: TagStatus.ACTIVE,
+            itemName: payload.itemName,
+            ownerPhone: payload.ownerPhone,
+            redirectUrl: `https://wa.me/${payload.ownerPhone}`
+         };
+         safeLocalStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+      } catch(e) { /* ignore local save error */ }
+
       return true;
     } catch (e) {
       console.error("Activation failed", e);
@@ -100,7 +147,7 @@ export const activateTag = async (payload: ActivationPayload, gasUrl?: string): 
 
   // Mock Implementation
   await new Promise(resolve => setTimeout(resolve, 1000));
-  const db = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+  const db = JSON.parse(safeLocalStorage.getItem(STORAGE_KEY) || '{}');
   
   db[payload.tagId] = {
     tagId: payload.tagId,
@@ -110,12 +157,12 @@ export const activateTag = async (payload: ActivationPayload, gasUrl?: string): 
     redirectUrl: `https://wa.me/${payload.ownerPhone}`
   };
   
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+  safeLocalStorage.setItem(STORAGE_KEY, JSON.stringify(db));
   return true;
 };
 
 export const getAllTags = (): TagData[] => {
   initDB();
-  const db = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+  const db = JSON.parse(safeLocalStorage.getItem(STORAGE_KEY) || '{}');
   return Object.values(db);
 }

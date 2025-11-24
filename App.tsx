@@ -5,25 +5,29 @@ import { FoundView } from './components/FoundView';
 import { Dashboard } from './components/Dashboard';
 import { getTagStatus, getAllTags } from './services/mockBackend';
 import { TagData, TagStatus } from './types';
-import { QrCode, Shield } from 'lucide-react';
+import { QrCode, Shield, AlertTriangle, Home } from 'lucide-react';
 
 // Your Google Apps Script Web App URL
 const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwDvbsM6B3GoqqAsGCXR-vkhBhve5dT3ExSF0ukrWqQcZP0LKQRf_tguIcRkXZ5mLq5/exec';
 
 const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [currentTag, setCurrentTag] = useState<TagData | null>(null);
   const [gasUrl, setGasUrl] = useState<string>(DEFAULT_GAS_URL);
   const [view, setView] = useState<'landing' | 'activating' | 'found' | 'success'>('landing');
 
-  // Load backend config from local storage, or stick with default
+  // Load backend config from local storage
   useEffect(() => {
-    const savedUrl = localStorage.getItem('gas_api_url');
-    if (savedUrl) {
-      setGasUrl(savedUrl);
-    } else {
-      // Ensure default is saved if nothing exists
-      localStorage.setItem('gas_api_url', DEFAULT_GAS_URL);
+    try {
+      const savedUrl = localStorage.getItem('gas_api_url');
+      if (savedUrl) {
+        setGasUrl(savedUrl);
+      } else {
+        localStorage.setItem('gas_api_url', DEFAULT_GAS_URL);
+      }
+    } catch (e) {
+      // Ignore localStorage errors
     }
   }, []);
 
@@ -43,17 +47,23 @@ const App: React.FC = () => {
 
   const checkTag = async (id: string) => {
     setLoading(true);
+    setError(null);
     try {
       const data = await getTagStatus(id, gasUrl);
+      
+      if (!data) {
+          throw new Error("No data returned from backend");
+      }
+
       setCurrentTag(data);
       if (data.status === TagStatus.ACTIVE) {
         setView('found');
       } else {
         setView('activating');
       }
-    } catch (error) {
-      console.error(error);
-      // Fallback/Error state could go here
+    } catch (error: any) {
+      console.error("Tag Check Error:", error);
+      setError(error.message || "Failed to load tag information.");
     } finally {
       setLoading(false);
     }
@@ -61,7 +71,9 @@ const App: React.FC = () => {
 
   const handleGasUrlChange = (url: string) => {
     setGasUrl(url);
-    localStorage.setItem('gas_api_url', url);
+    try {
+        localStorage.setItem('gas_api_url', url);
+    } catch(e) {}
   };
 
   const handleActivationSuccess = () => {
@@ -72,10 +84,42 @@ const App: React.FC = () => {
     }, 2000);
   };
 
+  const resetToHome = () => {
+    window.history.pushState({}, '', window.location.pathname);
+    setView('landing');
+    setError(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <StatusSpinner />
+      </div>
+    );
+  }
+
+  // Error View
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-xl shadow-lg max-w-md text-center border border-red-100">
+            <div className="bg-red-100 p-4 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-8 h-8 text-red-500" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Something went wrong</h2>
+            <p className="text-gray-600 mb-6 text-sm">
+                We couldn't load the tag information. The database might be unreachable or blocked by your network.
+                <br/>
+                <span className="text-xs text-gray-400 font-mono mt-2 block">{error}</span>
+            </p>
+            <button 
+                onClick={resetToHome}
+                className="w-full bg-gray-900 text-white py-3 px-4 rounded-lg font-medium hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+            >
+                <Home className="w-4 h-4" />
+                Go to Dashboard
+            </button>
+        </div>
       </div>
     );
   }
@@ -86,10 +130,7 @@ const App: React.FC = () => {
       <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
-            <div className="flex items-center cursor-pointer" onClick={() => {
-                window.history.pushState({}, '', window.location.pathname);
-                setView('landing');
-            }}>
+            <div className="flex items-center cursor-pointer" onClick={resetToHome}>
               <QrCode className="h-8 w-8 text-brand-600" />
               <span className="ml-2 text-xl font-bold tracking-tight text-gray-900">
                 ScanTo<span className="text-brand-600">Return</span>
@@ -97,8 +138,8 @@ const App: React.FC = () => {
             </div>
             {view !== 'landing' && (
                 <div className="flex items-center">
-                   <div className="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-500">
-                     {currentTag?.tagId}
+                   <div className="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-500 border border-gray-200">
+                     {currentTag?.tagId || '...'}
                    </div>
                 </div>
             )}
