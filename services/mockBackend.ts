@@ -49,14 +49,18 @@ export const getTagStatus = async (tagId: string, gasUrl?: string): Promise<TagD
   // If a real Google Apps Script URL is provided
   if (urlToUse && urlToUse.startsWith('http')) {
     try {
+      // Setup AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+
       // CRITICAL FIX: Do NOT send headers with GET requests to GAS Web Apps.
-      // Sending headers triggers a CORS Preflight (OPTIONS) request, which GAS rejects with 405.
       const response = await fetch(`${urlToUse}?tag=${tagId}`, {
         method: 'GET',
-        // mode: 'cors' is default and correct for GET if we want to read the body
-        // headers: {}  <-- REMOVED to allow Simple Request
+        signal: controller.signal
       });
       
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
         throw new Error(`HTTP Error: ${response.status}`);
       }
@@ -64,7 +68,7 @@ export const getTagStatus = async (tagId: string, gasUrl?: string): Promise<TagD
       const text = await response.text();
       // GAS sometimes returns HTML error pages even with 200 OK
       if (text.trim().startsWith('<')) { 
-          throw new Error("Received HTML instead of JSON"); 
+          throw new Error("Received HTML instead of JSON (Google authentication or script error)"); 
       }
 
       const data = JSON.parse(text);
@@ -82,15 +86,19 @@ export const getTagStatus = async (tagId: string, gasUrl?: string): Promise<TagD
       // If status is 'new' or anything else
       return { tagId, status: TagStatus.NEW };
       
-    } catch (e) {
+    } catch (e: any) {
       console.warn("Failed to fetch from real API, falling back to mock...", e);
+      if (e.name === 'AbortError') {
+         throw new Error("Connection timed out. Please check your internet.");
+      }
       // We intentionally fall through to mock data so the UI doesn't break completely
+      // UNLESS it was a specific connectivity error we want to show
     }
   }
 
   // Fallback to LocalStorage Mock
   initDB();
-  await new Promise(resolve => setTimeout(resolve, 500)); // Shortened latency
+  await new Promise(resolve => setTimeout(resolve, 500)); 
   
   try {
     const db = JSON.parse(safeLocalStorage.getItem(STORAGE_KEY) || '{}');

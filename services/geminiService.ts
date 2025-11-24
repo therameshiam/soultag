@@ -1,13 +1,35 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialization to prevent "process is not defined" crashes on static hosts
+let aiInstance: GoogleGenAI | null = null;
+
+const getAiClient = (): GoogleGenAI | null => {
+  if (!aiInstance) {
+    try {
+      // Safe access to process.env for static environments (GitHub Pages, etc.)
+      // @ts-ignore - process might not be defined in browser scope
+      const apiKey = typeof process !== 'undefined' && process.env ? process.env.API_KEY : '';
+      
+      if (apiKey) {
+        aiInstance = new GoogleGenAI({ apiKey });
+      } else {
+        console.warn("Gemini API Key missing. AI features will use fallbacks.");
+      }
+    } catch (e) {
+      console.warn("Environment access failed. AI features disabled.");
+    }
+  }
+  return aiInstance;
+};
 
 /**
  * Generates a polite and helpful message for the finder to send to the owner.
  */
 export const generateFoundMessage = async (itemName: string, locationHint?: string): Promise<string> => {
   try {
+    const ai = getAiClient();
+    if (!ai) throw new Error("AI Client not initialized");
+
     const prompt = `
       You are a helpful assistant assisting a good samaritan who found a lost item.
       The item is: "${itemName}".
@@ -25,7 +47,7 @@ export const generateFoundMessage = async (itemName: string, locationHint?: stri
 
     return response.text?.trim() || `Hi, I found your ${itemName}. Please let me know how to return it.`;
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    console.warn("Gemini API Error (using fallback):", error);
     return `Hi, I found your ${itemName}. Please let me know how to return it.`;
   }
 };
@@ -35,6 +57,9 @@ export const generateFoundMessage = async (itemName: string, locationHint?: stri
  */
 export const suggestItemNames = async (category: string): Promise<string[]> => {
   try {
+    const ai = getAiClient();
+    if (!ai) return [];
+
     const prompt = `
       List 3 short, descriptive names for a lost-and-found tag attached to a "${category}".
       Return ONLY a JSON array of strings.
